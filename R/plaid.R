@@ -4,7 +4,7 @@
 ##
 
 #' @importFrom methods as
-#' @importFrom stats ecdf
+#' @importFrom stats ecdf quantile
 #' @importFrom Matrix colSums colScale crossprod Diagonal rowMeans t which
 #' @importFrom matrixStats colMedians
 #' @importFrom MatrixGenerics colRanks rowSds
@@ -112,10 +112,8 @@ plaid <- function(X, matG, stats=c("mean","sum"), chunk=NULL, normalize=TRUE,
     X <- .extract_expression_matrix(X, assay=assay, log.transform=FALSE)
   }
   
-  if (inherits(matG, "BiocSet") || (is.list(matG) && !is.matrix(matG) && !inherits(matG, "Matrix"))) {
-    matG <- .convert_geneset_to_matrix(matG, background=rownames(X), 
-                                       min.genes=min.genes, max.genes=max.genes)
-  }
+  matG <- .convert_geneset_to_matrix(matG, background=rownames(X),
+                                     min.genes=min.genes, max.genes=max.genes)
 
   stats <- stats[1]
   if (NCOL(X) == 1) X <- cbind(X)
@@ -267,13 +265,11 @@ replaid.scse <- function(X,
     X <- .extract_expression_matrix(X, assay=assay, log.transform=FALSE)
   }
   
-  if (inherits(matG, "BiocSet") || (is.list(matG) && !is.matrix(matG) && !inherits(matG, "Matrix"))) {
-    matG <- .convert_geneset_to_matrix(matG, background=rownames(X), 
-                                       min.genes=min.genes, max.genes=max.genes)
-  }
+  matG <- .convert_geneset_to_matrix(matG, background=rownames(X),
+                                     min.genes=min.genes, max.genes=max.genes)
 
   if(is.null(removeLog2))
-    removeLog2 <- min(X, na.rm = TRUE)==0 && max(X, na.rm = TRUE) < 20
+    removeLog2 <- min(X, na.rm = TRUE)==0 && max(X, na.rm=TRUE) < 20
   
   if(removeLog2)  {
     message("[replaid.scse] Converting data to linear scale (removing log2)...")
@@ -356,10 +352,8 @@ replaid.sing <- function(X, matG, assay="logcounts", min.genes=5, max.genes=500)
     X <- .extract_expression_matrix(X, assay=assay, log.transform=FALSE)
   }
   
-  if (inherits(matG, "BiocSet") || (is.list(matG) && !is.matrix(matG) && !inherits(matG, "Matrix"))) {
-    matG <- .convert_geneset_to_matrix(matG, background=rownames(X), 
-                                       min.genes=min.genes, max.genes=max.genes)
-  }
+  matG <- .convert_geneset_to_matrix(matG, background=rownames(X),
+                                     min.genes=min.genes, max.genes=max.genes)
   
   ## the ties.method=min is important for exact replication
   rX <- colranks(X, ties.method = "min")
@@ -426,18 +420,21 @@ replaid.ssgsea <- function(X, matG, alpha = 0, assay="logcounts", min.genes=5, m
     X <- .extract_expression_matrix(X, assay=assay, log.transform=FALSE)
   }
   
-  if (inherits(matG, "BiocSet") || (is.list(matG) && !is.matrix(matG) && !inherits(matG, "Matrix"))) {
-    matG <- .convert_geneset_to_matrix(matG, background=rownames(X), 
-                                       min.genes=min.genes, max.genes=max.genes)
-  }
+  matG <- .convert_geneset_to_matrix(matG, background=rownames(X),
+                                     min.genes=min.genes, max.genes=max.genes)
   
-  rX <- colranks(X, keep.zero = TRUE, ties.method = "average")
+  rX <- colranks(X, keep.zero = FALSE, ties.method = "average")
   if(alpha != 0) {
     ## This is not exactly like original formula. Not sure how to
     ## efficiently implement original rank weighting
     rX <- rX^(1 + alpha)
   }
-  rX <- rX / max(rX) - 0.5
+  ## center and normalize
+  rX <- rX - mean(rX,na.rm=TRUE)
+  rX <- (rX / max(abs(rX),na.rm=TRUE))
+  ## add scaling (to match NES scale)
+  qx <- quantile(abs(rX),probs=0.99)
+  rX <- 0.9 * rX / qx  
   dimnames(rX) <- dimnames(X)
   gsetX <- plaid(rX, matG, stats = "mean", normalize = TRUE)
   return(gsetX)
@@ -499,13 +496,11 @@ replaid.ucell <- function(X, matG, rmax = 1500, assay="logcounts", min.genes=5, 
     X <- .extract_expression_matrix(X, assay=assay, log.transform=FALSE)
   }
   
-  if (inherits(matG, "BiocSet") || (is.list(matG) && !is.matrix(matG) && !inherits(matG, "Matrix"))) {
-    matG <- .convert_geneset_to_matrix(matG, background=rownames(X), 
-                                       min.genes=min.genes, max.genes=max.genes)
-  }
+  matG <- .convert_geneset_to_matrix(matG, background=rownames(X),
+                                     min.genes=min.genes, max.genes=max.genes)
   
   rX <- colranks(X, ties.method = "average")
-  rX <- pmin( max(rX) - rX, rmax+1 )
+  rX <- pmin( max(rX, na.rm=TRUE) - rX, rmax+1 )
   S <- plaid(rX, matG)
   S <- 1 - S / rmax + (Matrix::colSums(matG!=0)+1)/(2*rmax)
   return(S)
@@ -563,17 +558,15 @@ replaid.aucell <- function(X, matG, aucMaxRank = NULL, assay="logcounts", min.ge
     X <- .extract_expression_matrix(X, assay=assay, log.transform=FALSE)
   }
   
-  if (inherits(matG, "BiocSet") || (is.list(matG) && !is.matrix(matG) && !inherits(matG, "Matrix"))) {
-    matG <- .convert_geneset_to_matrix(matG, background=rownames(X), 
-                                       min.genes=min.genes, max.genes=max.genes)
-  }
+  matG <- .convert_geneset_to_matrix(matG, background=rownames(X),
+                                     min.genes=min.genes, max.genes=max.genes)
   
   if (is.null(aucMaxRank)) {
     aucMaxRank <- ceiling(0.05*nrow(X))
   }
   
   rX <- colranks(X, ties.method = "average")
-  ww <- 1.08*pmax((rX - (max(rX) - aucMaxRank)) / aucMaxRank, 0)
+  ww <- 1.08*pmax((rX - (max(rX, na.rm=TRUE) - aucMaxRank)) / aucMaxRank, 0)
   gsetX <- plaid(ww, matG, stats = "mean")
   return(gsetX)
 }
@@ -637,10 +630,8 @@ replaid.gsva <- function(X, matG, tau = 0, rowtf = c("z", "ecdf")[1], assay="log
     X <- .extract_expression_matrix(X, assay=assay, log.transform=FALSE)
   }
   
-  if (inherits(matG, "BiocSet") || (is.list(matG) && !is.matrix(matG) && !inherits(matG, "Matrix"))) {
-    matG <- .convert_geneset_to_matrix(matG, background=rownames(X), 
-                                       min.genes=min.genes, max.genes=max.genes)
-  }
+  matG <- .convert_geneset_to_matrix(matG, background=rownames(X),
+                                     min.genes=min.genes, max.genes=max.genes)
   
   rowtf <- rowtf[1]
 
@@ -654,8 +645,9 @@ replaid.gsva <- function(X, matG, tau = 0, rowtf = c("z", "ecdf")[1], assay="log
     stop("unknown row transform",rowtf)
   }
 
-  rX <- colranks(zX, signed = TRUE, ties.method = "average")
-  rX <- rX / max(abs(rX))
+  rX <- colranks(zX, signed = FALSE, ties.method = "average")
+  rX <- rX - mean(rX,na.rm=TRUE)
+  rX <- rX / max(abs(rX), na.rm=TRUE)
   if(tau > 0) {
     ## Note: This is not exactly like original formula. Not sure how
     ## to efficiently implement original rank weighting
@@ -729,7 +721,7 @@ normalize_medians <- function(x, ignore.zero = NULL) {
 #' Compute columnwise ranks of matrix
 #'
 #' Computes columnwise rank of matrix. Can be sparse. Tries to call
-#' optimized functions from Rfast or matrixStats.
+#' optimized functions from matrixStats.
 #'
 #' @param X Input matrix
 #' @param sparse Logical indicating to use sparse methods
@@ -760,7 +752,7 @@ colranks <- function(X,
                      signed = FALSE,
                      keep.zero = FALSE,
                      ties.method = "average") {
-
+  
   if(is.null(sparse))
     sparse <- inherits(X,"CsparseMatrix")
 
